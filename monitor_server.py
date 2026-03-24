@@ -15,11 +15,11 @@ Install:
     pip install aiohttp rich plyer
 
 Run:
-    python deltawatch.py
-    python deltawatch.py --port 8765
-    python deltawatch.py --reset
-    python deltawatch.py --no-notify
-    python deltawatch.py --host 0.0.0.0   # all interfaces
+    python server_monitor.py
+    python server_monitor.py --port 8765
+    python server_monitor.py --reset
+    python server_monitor.py --no-notify
+    python server_monitor.py --host 0.0.0.0   # all interfaces
 
 Endpoints:
     POST http://localhost:8765/snapshot       — browser pushes DOM snapshot
