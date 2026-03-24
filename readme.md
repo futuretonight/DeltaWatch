@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=28&duration=2500&pause=800&color=00F7FF&center=true&vCenter=true&width=600&lines=Exam+Monitor+v7.0;Real-time+JEE+%2F+EAPCET+Tracker;Zero+Delay+DOM+Detection" />
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=28&duration=2500&pause=800&color=00F7FF&center=true&vCenter=true&width=600&lines=Exam+Monitor+v2.0;Real-time+JEE+%2F+EAPCET+Tracker;Zero+Delay+DOM+Detection" />
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 
 ---
 
-# 🎯 Exam Monitor (v7.0)
+# 🎯 Exam Monitor (v2.0)
 
 > ⚡ **Real-time change detection for JEE Main & TG EAPCET websites**
 
