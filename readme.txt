@@ -1,119 +1,108 @@
-﻿<h1 align="center">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Monitor</title>
+</head>
+<body>
 
-
-
-
-
-<img src="https://www.google.com/search?q=https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/eye.svg" alt="DeltaWatch Logo" width="128" style="filter: invert(36%) sepia(85%) saturate(1006%) hue-rotate(185deg) brightness(91%) contrast(101%);">
-
-
-
-
-
-DeltaWatch
-
-
-
-
-
-</h1>
-
-<h4 align="center">Zero-latency mutation surveillance for JEE Main & TG EAPCET.</h4>
-
-<p align="center">
-<a href="https://www.python.org/">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Python-3.9%2B-3776AB%3Fstyle%3Dfor-the-badge%26logo%3Dpython%26logoColor%3Dwhite" alt="Python Version"/>
-</a>
-<a href="https://www.apache.org/licenses/LICENSE-2.0">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/License-Apache%25202.0-D22128%3Fstyle%3Dfor-the-badge%26logo%3Dapache%26logoColor%3Dwhite" alt="License"/>
-</a>
-<a href="#">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Bypass-CSP_Exempt-005963%3Fstyle%3Dfor-the-badge%26logo%3Dsecurityscorecard%26logoColor%3Dwhite" alt="CSP Status"/>
-</a>
+<p>
+  <a href="https://www.codefactor.io/repository/github/futuretonight/deltawatch">
+    <img src="https://www.codefactor.io/repository/github/futuretonight/deltawatch/badge" alt="CodeFactor" />
+  </a>
 </p>
 
-<p align="center">
-<a href="#-what-is-it">What is it?</a> •
-<a href="#-key-features">Features</a> •
-<a href="#-quick-start">Quick Start</a> •
-<a href="#-architecture">Architecture</a> •
-<a href="#-license">License</a>
-</p>
+<h1>🎯 Exam Monitor (v7.0)</h1>
 
-🔍 What is it?
+<p><strong>Exam Monitor</strong> is a real-time change detector for the <strong>JEE Main</strong> and <strong>TG EAPCET</strong> official websites. Instead of traditional polling (which can be slow or blocked), this tool uses a browser-resident agent to watch for DOM mutations and instantly pushes updates to a local Python server.</p>
 
-DeltaWatch is a real-time change detection suite specifically engineered for high-stakes exam portals. Unlike traditional scrapers that rely on periodic HTTP polling, DeltaWatch uses a MutationObserver agent that lives inside the browser. It detects DOM changes the millisecond they occur and tunnels a snapshot to a local Python server.
+<h2>🚀 Key Features</h2>
+<ul>
+  <li><strong>CSP-Exempt Transport:</strong> Uses <code>GM_xmlhttpRequest</code> to bypass strict Content Security Policies that block WebSockets.</li>
+  <li><strong>Rich Terminal UI:</strong> Beautifully formatted alerts and status tracking powered by the <code>rich</code> library.</li>
+  <li><strong>Smart Diffing:</strong> Only alerts on <em>new</em> content (Public Notices, News Tickers, or Link updates) using SHA-1 hashing.</li>
+  <li><strong>Desktop Alerts:</strong> Instant notifications and system beeps so you never miss an update.</li>
+</ul>
 
-It is designed to solve the "Strict CSP" problem. While sites like JEE Main block WebSockets (ws://) via Content Security Policy, DeltaWatch utilizes GM_xmlhttpRequest to bypass these restrictions entirely, ensuring a 100% reliable connection.
+<hr/>
 
-✨ Key Features
+<h2>🛠️ Setup &amp; Installation</h2>
 
-Mutation Surveillance: Reacts to live AJAX updates, ticker changes, and document injections instantly.
+<h3>1. The Python Server</h3>
+<p>Requires <strong>Python 3.9+</strong>.</p>
 
-CSP-Exempt Transport: Uses the extension network stack to bypass site-level security headers.
-
-SHA-1 Diff Engine: Smart hashing prevents duplicate alerts. You only get notified when content actually changes.
-
-Rich Dashboard: A beautiful terminal interface powered by the rich library with color-coded event logging.
-
-Persistence Layer: Saves site states to exam_cache.json so you can restart the server without losing the baseline.
-
-🚀 Quick Start
-
-1. Install Dependencies
-
-The server requires Python 3.9+ and a few lightweight libraries.
-
+<pre><code># Install dependencies
 pip install aiohttp rich plyer
 
-
-2. Run the Brain
-
-Start the monitoring server on your local machine.
-
+# Run the server
 python monitor_server_v7.py
+</code></pre>
 
+<h3>2. The Browser Agent</h3>
+<ol>
+  <li>Install the <strong>Tampermonkey</strong> extension (Chrome/Brave/Edge).</li>
+  <li>Create a "New Script" and paste the contents of <code>monitor_agent.js</code>.</li>
+  <li><strong>Crucial for Brave Users:</strong>
+    <ul>
+      <li>Go to Site Settings for the exam websites.</li>
+      <li>Set <strong>Insecure content</strong> to <strong>Allow</strong> (this lets the HTTPS page talk to your <code>http://localhost</code> server).</li>
+    </ul>
+  </li>
+</ol>
 
-3. Setup the Agent
+<hr/>
 
-Install the Tampermonkey extension.
+<h2>🖥️ Usage</h2>
 
-Create a new script and paste the contents of monitor_agent.js.
+<p>Once the server is running and the agent is active, simply keep the exam tabs open.</p>
 
-Important for Brave/Chrome: Open Site Settings for the exam page and set Insecure content to Allow. This enables the browser to talk to http://localhost.
+<table border="1" cellpadding="6" cellspacing="0">
+  <tr>
+    <th>Command</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>python monitor_server_v7.py</code></td>
+    <td>Start monitoring with default settings.</td>
+  </tr>
+  <tr>
+    <td><code>python monitor_server_v7.py --reset</code></td>
+    <td>Wipe the cache and start a fresh baseline.</td>
+  </tr>
+  <tr>
+    <td><code>python monitor_server_v7.py --port 9000</code></td>
+    <td>Use a custom port (remember to update the JS agent).</td>
+  </tr>
+  <tr>
+    <td><code>python monitor_server_v7.py --no-notify</code></td>
+    <td>Terminal alerts only (no desktop popups).</td>
+  </tr>
+</table>
 
-🏗 Architecture
+<h3>The "ExamMon" Badge</h3>
+<ul>
+  <li>🟢 <strong>Watching:</strong> Active and connected.</li>
+  <li>🔵 <strong>Baseline Saved:</strong> Initial site state captured.</li>
+  <li>🔴 <strong>Alerts:</strong> Change detected! Check your terminal.</li>
+  <li>⚪ <strong>Server Offline:</strong> Check if the Python script is running.</li>
+</ul>
 
-Class / File
+<hr/>
 
-Description
+<h2>📂 Project Structure</h2>
+<ul>
+  <li><code>monitor_server_v7.py</code>: The "Brain." Handles diffing, logging, and notifications.</li>
+  <li><code>monitor_agent.js</code>: The "Eyes." Watches the DOM for changes and POSTs snapshots.</li>
+  <li><code>exam_cache.json</code>: Persists known items so you don't get duplicate alerts on restart.</li>
+  <li><code>exam_changes.log</code>: A permanent, timestamped record of every change detected.</li>
+</ul>
 
-monitor_server_v7.py
+<hr/>
 
-The central hub. Handles async HTTP requests, diffing logic, and notifications.
+<blockquote>
+  <strong>💡 Tip:</strong> For a full technical breakdown of the hashing logic, the CSP bypass mechanics, and how to add new sites, check out the <strong>Project Wiki</strong>.
+</blockquote>
 
-monitor_agent.js
-
-The browser agent. Scans the DOM and handles throttled snapshots.
-
-exam_cache.json
-
-The local state store. Keeps SHA-1 hashes of all known items.
-
-exam_changes.log
-
-A permanent, append-only ledger of every detected website change.
-
-📜 License
-
-Copyright (c) 2026 Yajath Krushna.
-
-DeltaWatch is licensed under the Apache License 2.0.
-
-[!IMPORTANT]
-
-Recognition Policy: You are free to use, modify, and distribute this software. However, you must retain all original copyright headers and attribute the work to the original author (Yajath Krushna). Redistribution without attribution is strictly prohibited.
-
-<p align="center">
-Developed for the student community by Yajath Krushna.
-</p>
+</body>
+</html>
