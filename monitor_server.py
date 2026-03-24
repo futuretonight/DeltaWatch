@@ -4,29 +4,29 @@
 ║         JEE Main  +  TG EAPCET  │  GM_xhr POST  │  CSP bypassed      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-Why HTTP instead of WebSocket:
-  The JEE website sends a strict CSP response header:
-    connect-src 'self' *.s3waas.gov.in *.google-analytics.com
-  This blocks ALL ws:// connections at the browser level — even from
-  Tampermonkey's sandbox. However GM_xmlhttpRequest is fully exempt
-  from CSP (confirmed: server returned 426 in diagnostics).
-  So we use GM_xhr POST instead — same push architecture, zero scraping.
+# ----------------------------------------------------------------
+# Project: deltawatch (Exam Monitor)
+# Author:  Yajath Krushna (https://github.com/futuretonight)
+# License: Apache License 2.0
+# Copyright (c) 2026 Yajath Krushna
+# ----------------------------------------------------------------
 
 Install:
-    pip install aiohttp colorama plyer
+    pip install aiohttp rich plyer
 
 Run:
     python deltawatch.py
     python deltawatch.py --port 8765
     python deltawatch.py --reset
     python deltawatch.py --no-notify
-    python deltawatch.py --host 0.0.0.0   # listen on all interfaces
+    python deltawatch.py --host 0.0.0.0   # all interfaces
 
 Endpoints:
-    POST http://localhost:8765/snapshot  — browser pushes DOM snapshot
-    GET  http://localhost:8765/ping      — health check
-    GET  http://localhost:8765/status    — current cache summary
-    POST http://localhost:8765/reset     — wipe cache at runtime (query: ?site=jee)
+    POST http://localhost:8765/snapshot       — browser pushes DOM snapshot
+    GET  http://localhost:8765/ping           — health check
+    GET  http://localhost:8765/status         — cache summary (JSON)
+    POST http://localhost:8765/reset          — wipe all caches
+    POST http://localhost:8765/reset?site=jee — wipe one site's cache
 
 """
 
@@ -40,81 +40,79 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-__version__ = "6.0.0"
+__version__ = "2.0.0"
 
-# ── Dependency guard ──────────────────────────────────────────────────────────
-# Only aiohttp is truly required.  colorama and plyer degrade gracefully.
+# file paths:- 
 
-_HARD_MISSING: list[str] = []
-
-try:
-    from aiohttp import web
-except ImportError:
-    _HARD_MISSING.append("aiohttp")
-
-if _HARD_MISSING:
-    print(f"[ERROR] Required package(s) missing: {', '.join(_HARD_MISSING)}")
-    print(f"        Run:  pip install {' '.join(_HARD_MISSING)}")
-    sys.exit(1)
-
-try:
-    from colorama import Fore, Style, init as _cinit
-    _cinit(autoreset=True)
-    _COLORAMA_OK = True
-except ImportError:
-    _COLORAMA_OK = False
-    class _Noop:                                # noqa: E302
-        def __getattr__(self, _: str) -> str:
-            return ""
-    Fore = Style = _Noop()                      # type: ignore[assignment]
-
-try:
-    from plyer import notification as _plyer    # type: ignore[import]
-    _PLYER_OK = True
-except ImportError:
-    _PLYER_OK = False
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%H:%M:%S",
-)
-_log = logging.getLogger("exam_monitor")
-
-# ── Terminal colour shortcuts ─────────────────────────────────────────────────
-C = Fore.CYAN    + Style.BRIGHT
-G = Fore.GREEN   + Style.BRIGHT
-Y = Fore.YELLOW  + Style.BRIGHT
-R = Fore.RED     + Style.BRIGHT
-M = Fore.MAGENTA + Style.BRIGHT
-D = Style.DIM
-Z = Style.RESET_ALL
-
-# ── Paths ─────────────────────────────────────────────────────────────────────
 CACHE_FILE = Path("exam_cache.json")
 LOG_FILE   = Path("exam_changes.log")
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-MAX_BODY_BYTES  = 2 * 1024 * 1024   # 2 MB — cap inbound payloads
-MAX_CACHE_ITEMS = 500               # per list, prevents unbounded growth
+# CONSTANTS
+MAX_BODY_BYTES  = 2 * 1024 * 1024   # 2 MB inbound cap
+MAX_CACHE_ITEMS = 500               # per list — prevents unbounded growth
 KNOWN_SITES     = frozenset({"jee", "eapcet"})
 
-SITE_LABELS: dict[str, str] = {
-    "jee":    "JEE Main  (jeemain.nta.nic.in)",
-    "eapcet": "TG EAPCET (eapcet.tgche.ac.in / eapcet.tsche.ac.in)",
+# Short label used in panel titles / notifications
+SITE_SHORT: dict[str, str] = {
+    "jee":    "JEE Main",
+    "eapcet": "TG EAPCET",
 }
 
+# Long label used in status line
+SITE_LABELS: dict[str, str] = {
+    "jee":    "JEE Main  (jeemain.nta.nic.in)",
+    "eapcet": "TG EAPCET (eapcet.tgche.ac.in)",
+}
+
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                  Hard dependency check                               ║ 
+#╚══════════════════════════════════════════════════════════════════════╝
+
+_MISSING: list[str] = []
+for _pkg in ("aiohttp", "rich"):
+    try:
+        __import__(_pkg)
+    except ImportError:
+        _MISSING.append(_pkg)
+
+if _MISSING:
+    print(f"[ERROR] Required packages missing: {', '.join(_MISSING)}")
+    print(f"        pip install {' '.join(_MISSING)}")
+    sys.exit(1)
+
+from aiohttp import web                             # noqa: E402
+from rich.console import Console                    # noqa: E402
+from rich.panel import Panel                        # noqa: E402
+from rich.table import Table                        # noqa: E402
+from rich.rule import Rule                          # noqa: E402
+from rich.text import Text                          # noqa: E402
+from rich import box as rich_box                    # noqa: E402
+
+try:
+    from plyer import notification as _plyer        # type: ignore[import]
+    _PLYER_OK = True
+except ImportError:
+    _PLYER_OK = False
+    _plyer = None
+    
+# console
+console = Console(highlight=False)
+
+# logging here
+logging.basicConfig(level=logging.WARNING)
+_log = logging.getLogger("exam_monitor")
+
 # ── Global state ──────────────────────────────────────────────────────────────
+# _connected_sites stores raw keys ("jee", "eapcet") — labels resolved at display
 _cache: dict              = {}
 _notify_enabled: bool     = True
 _request_count: int       = 0
-_connected_sites: set     = set()
-_start_time: float        = time.monotonic()
-_cache_lock: asyncio.Lock            # initialised in main()
-_ticker_task: asyncio.Task | None = None
-
+_connected_sites: set     = set()          # stores "jee" / "eapcet" only
+_start_time: float        = 0.0
+_cache_lock: Optional[asyncio.Lock] = None
+_ticker_task: Optional[asyncio.Task] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Cache helpers
@@ -132,38 +130,7 @@ def _empty_site() -> dict:
         "known_links":        [],
     }
 
-
-def _ensure_hashes(items: list) -> list:
-    """Back-fill 'hash' field on items loaded from an older cache file."""
-    out = []
-    for item in items:
-        item = dict(item)
-        if "hash" not in item:
-            item["hash"] = item_hash(item.get("text", ""), item.get("href", ""))
-        out.append(item)
-    return out
-
-
-def load_cache() -> dict:
-    if CACHE_FILE.exists():
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            # Back-fill hashes on old data so find_new / merge don't KeyError
-            for site_key in KNOWN_SITES:
-                site_data = data.get(site_key)
-                if isinstance(site_data, dict):
-                    for list_key in (
-                        "public_notices", "candidate_activity", "latest_news_jee",
-                        "latest_updates", "full_text_blocks", "known_links",
-                    ):
-                        if isinstance(site_data.get(list_key), list):
-                            site_data[list_key] = _ensure_hashes(site_data[list_key])
-            _log.info("Cache loaded from %s", CACHE_FILE)
-            return data
-        except Exception as exc:
-            _log.warning("Cache file corrupt, starting fresh: %s", exc)
-
+def _empty_cache() -> dict:
     return {
         "jee":    _empty_site(),
         "eapcet": _empty_site(),
@@ -174,6 +141,39 @@ def load_cache() -> dict:
         },
     }
 
+def _backfill_hashes(items: list) -> list:
+    """Add missing 'hash' fields to items loaded from older cache files."""
+    out: list[dict] = []
+    for raw in items:
+        item = dict(raw)
+        if "hash" not in item:
+            item["hash"] = item_hash(item.get("text", ""), item.get("href", ""))
+        out.append(item)
+    return out
+
+def load_cache() -> dict:
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            # Ensure meta block exists
+            if "meta" not in data or not isinstance(data["meta"], dict):
+                data["meta"] = _empty_cache()["meta"]
+            # Ensure site blocks exist and back-fill hashes
+            for sk in KNOWN_SITES:
+                if sk not in data or not isinstance(data[sk], dict):
+                    data[sk] = _empty_site()
+                else:
+                    for list_key in (
+                        "public_notices", "candidate_activity", "latest_news_jee",
+                        "latest_updates", "full_text_blocks", "known_links",
+                    ):
+                        if isinstance(data[sk].get(list_key), list):
+                            data[sk][list_key] = _backfill_hashes(data[sk][list_key])
+            return data
+        except Exception as exc:
+            _log.warning("Cache file unreadable, starting fresh: %s", exc)
+    return _empty_cache()
 
 def _save_cache_sync(cache: dict) -> None:
     """Blocking write — always call via asyncio.to_thread()."""
@@ -181,19 +181,15 @@ def _save_cache_sync(cache: dict) -> None:
     tmp = CACHE_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(cache, fh, indent=2, ensure_ascii=False)
-    tmp.replace(CACHE_FILE)   # atomic on POSIX; near-atomic on Windows
-
+    tmp.replace(CACHE_FILE)  # atomic on POSIX, near-atomic on Windows
 
 async def save_cache(cache: dict) -> None:
-    """Non-blocking cache save (runs in a thread pool)."""
     try:
         await asyncio.to_thread(_save_cache_sync, cache)
     except Exception as exc:
-        _log.error("Failed to save cache: %s", exc)
-
+        _log.error("save_cache failed: %s", exc)
 
 def _log_change_sync(site: str, section: str, items: list) -> None:
-    """Blocking file append — always call via asyncio.to_thread()."""
     ts = datetime.now().isoformat()
     with open(LOG_FILE, "a", encoding="utf-8") as fh:
         fh.write(f"\n[{ts}]  {site.upper()}  —  {section}\n")
@@ -203,26 +199,23 @@ def _log_change_sync(site: str, section: str, items: list) -> None:
                 fh.write(f"    {item['href']}\n")
         fh.write("─" * 60 + "\n")
 
-
 async def log_change(site: str, section: str, items: list) -> None:
     try:
         await asyncio.to_thread(_log_change_sync, site, section, items)
     except Exception as exc:
-        _log.error("Failed to write log: %s", exc)
+        _log.error("log_change failed: %s", exc)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Item helpers
-# ─────────────────────────────────────────────────────────────────────────────
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                      item helpers                                    ║
+#╚══════════════════════════════════════════════════════════════════════╝
 
 def item_hash(text: str, href: str = "") -> str:
     return hashlib.sha1(
         f"{text.strip()}||{href.strip()}".encode()
     ).hexdigest()[:14]
 
-
 def enrich(items: object) -> list:
-    """Normalise, validate, and stamp incoming items."""
+    """Validate, normalise, and timestamp a raw items list from the browser."""
     if not isinstance(items, list):
         return []
     out: list[dict] = []
@@ -235,44 +228,38 @@ def enrich(items: object) -> list:
         out.append(item)
     return out
 
-
 def find_new(cached: list, live: list) -> list:
-    """Return items in *live* whose hash is not in *cached*."""
     try:
-        known = {i["hash"] for i in cached}
-    except (KeyError, TypeError):
+        known = {i["hash"] for i in cached if isinstance(i, dict)}
+    except Exception:
         known = set()
-    return [i for i in live if i.get("hash") not in known]
-
+    return [i for i in live if isinstance(i, dict) and i.get("hash") not in known]
 
 def merge(cached: list, live: list, cap: int = MAX_CACHE_ITEMS) -> list:
-    """Prepend genuinely new live items to cache; respect cap."""
     try:
-        known = {i["hash"] for i in cached}
-    except (KeyError, TypeError):
+        known = {i["hash"] for i in cached if isinstance(i, dict)}
+    except Exception:
         known = set()
-    combined = [i for i in live if i.get("hash") not in known] + cached
+    combined = [i for i in live if isinstance(i, dict) and i.get("hash") not in known] + cached
     return combined[:cap]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Notifications + sound
-# ─────────────────────────────────────────────────────────────────────────────
+#╔══════════════════════════════════════════════════════════════════════╗
+#║        notification and sound module                                 ║
+#╚══════════════════════════════════════════════════════════════════════╝
 
 def notify(title: str, body: str) -> None:
-    if not _notify_enabled or not _PLYER_OK:
+    if not _notify_enabled or _plyer is None:
         return
     try:
         _plyer.notify(title=title, message=body[:256],
                       app_name="Exam Monitor", timeout=8)
-    except Exception as exc:
-        _log.debug("Notification failed: %s", exc)
-
+    except Exception:
+        pass
 
 def beep() -> None:
     try:
         if platform.system() == "Windows":
-            import winsound                      # noqa: PLC0415
+            import winsound
             winsound.Beep(1000, 250)
             winsound.Beep(1300, 180)
         else:
@@ -281,97 +268,184 @@ def beep() -> None:
     except Exception:
         pass
 
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                            ui stuff                                  ║
+#╚══════════════════════════════════════════════════════════════════════╝
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Terminal output
-# ─────────────────────────────────────────────────────────────────────────────
-
-_ERASE_LINE = "\033[2K"   # ANSI: erase entire current line
-
-def _ts() -> str:
+def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
-
-def alert_box(site: str, section: str, items: list) -> None:
-    label = SITE_LABELS.get(site, site.upper())
-    # Erase any status-ticker remnant before drawing the box
-    print(f"\r{_ERASE_LINE}")
-    print(f"{R}{'━'*70}")
-    print(f"  🔔  [{_ts()}]  {label}")
-    print(f"       Section : {section}")
-    print(f"{'━'*70}{Z}")
-    for item in items:
-        print(f"  {M}  ➕  {item.get('text', '')}{Z}")
-        if item.get("href"):
-            print(f"       {D}↳  {item['href']}{Z}")
-    print()
+def _uptime_str() -> str:
+    total = int(time.monotonic() - _start_time)
+    h, r  = divmod(total, 3600)
+    m, s  = divmod(r, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def info(msg: str) -> None:
-    print(f"\r{_ERASE_LINE}  {D}[{_ts()}]{Z}  {msg}")
+def print_header(host: str, port: int) -> None:
+    """Startup banner."""
+    title = Text.assemble(
+        ("DeltaWatch (website monitor)  ", "bold cyan"),
+        (f"v{__version__}", "bold white"),
+        ("  │  JEE Main + TG EAPCET", "dim cyan"),
+    )
+    body = Text()
+    body.append(f"  Cache  : ", style="dim")
+    body.append(str(CACHE_FILE.resolve()), style="cyan")
+    body.append(f"\n  Log    : ", style="dim")
+    body.append(str(LOG_FILE.resolve()), style="cyan")
+    body.append(f"\n  Notify : ", style="dim")
+    if _PLYER_OK:
+        body.append("enabled", style="green")
+    else:
+        body.append("disabled  (pip install plyer)", style="yellow")
+    body.append(f"\n\n  Server : ", style="dim")
+    body.append(f"http://{host}:{port}", style="bold green")
+    body.append(f"\n\n  POST  /snapshot          browser pushes DOM snapshot", style="dim")
+    body.append(f"\n  GET   /ping              health check", style="dim")
+    body.append(f"\n  GET   /status            cache summary (JSON)", style="dim")
+    body.append(f"\n  POST  /reset[?site=jee]  wipe cache at runtime", style="dim")
+    body.append(f"\n\n  ℹ  CSP on JEE blocks WebSocket → GM_xhr POST (CSP-exempt) used instead.", style="yellow")
+    body.append(f"\n  put the js script in Tampermonkey so it can auto-run on JEE / EAPCET tabs.  Ctrl-C to stop.", style="dim")
+    console.print(Panel(body, title=title, border_style="cyan", padding=(0, 1)))
+    console.print()
+
+
+def print_info(msg: str) -> None:
+    console.print(f"  [dim][[{_now()}]][/dim]  {msg}")
 
 
 def print_status() -> None:
-    sites  = ", ".join(sorted(_connected_sites)) if _connected_sites else "none"
+    """Periodic status line — rendered cleanly by rich (no \\r tricks needed)."""
     alerts = _cache.get("meta", {}).get("total_alerts", 0)
-    uptime = int(time.monotonic() - _start_time)
-    h, rem = divmod(uptime, 3600)
-    m, s   = divmod(rem, 60)
-    up_str = f"{h:02d}:{m:02d}:{s:02d}"
-    alert_col = R if alerts else G
-    print(
-        f"\r{_ERASE_LINE}  {D}[{_ts()}]  "
-        f"up {up_str}  │  active: {G}{sites}{Z}"
-        f"  {D}│  requests: {_request_count}"
-        f"  │  alerts: {Z}{alert_col}{alerts}{Z}",
-        end="", flush=True,
+    alert_style = "bold red" if alerts else "bold green"
+
+    if _connected_sites:
+        # Show short labels for connected sites
+        labels = [SITE_LABELS.get(s, s) for s in sorted(_connected_sites)]
+        sites_str = "  •  ".join(labels)
+        sites_markup = f"[bold green]{sites_str}[/bold green]"
+    else:
+        sites_markup = "[dim]none[/dim]"
+
+    console.print(
+        f"  [dim][[{_now()}]][/dim]"
+        f"  up [cyan]{_uptime_str()}[/cyan]"
+        f"  │  active: {sites_markup}"
+        f"  │  requests: [dim]{_request_count}[/dim]"
+        f"  │  alerts: [{alert_style}]{alerts}[/{alert_style}]"
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Diff engine
-# ─────────────────────────────────────────────────────────────────────────────
+def alert_box(site: str, section: str, items: list) -> None:
+    """Print a rich alert panel for newly detected items."""
+    short = SITE_SHORT.get(site, site.upper())
+
+    # Build the items table
+    tbl = Table(
+        box=rich_box.SIMPLE,
+        show_header=False,
+        padding=(0, 1),
+        expand=True,
+    )
+    tbl.add_column("icon",   style="bold magenta", no_wrap=True, width=3)
+    tbl.add_column("text",   style="white")
+    tbl.add_column("href",   style="dim cyan")
+
+    for item in items:
+        text = item.get("text", "").strip()
+        href = item.get("href", "").strip()
+        tbl.add_row("➕", text, href if href else "")
+
+    title = Text.assemble(
+        ("🔔 ", ""),
+        (f"[{_now()}]  ", "dim white"),
+        (short, "bold white"),
+        ("  —  ", "dim white"),
+        (section, "bold yellow"),
+    )
+    console.print(
+        Panel(tbl, title=title, border_style="bold red", padding=(0, 1))
+    )
+
+
+def date_change_box(site: str, old: str, new: str) -> None:
+    body = Text()
+    body.append("  Was : ", style="dim")
+    body.append(old, style="yellow")
+    body.append("\n  Now : ", style="dim")
+    body.append(new, style="bold green")
+
+    title = Text.assemble(
+        ("🗓  ", ""),
+        (f"[{_now()}]  ", "dim white"),
+        ("JEE Main — SITE DATE CHANGED", "bold red"),
+    )
+    console.print(Panel(body, title=title, border_style="bold red", padding=(0, 1)))
+
+
+def baseline_box(site: str, counts: dict) -> None:
+    short = SITE_SHORT.get(site, site.upper())
+    tbl = Table(box=rich_box.SIMPLE, show_header=False, padding=(0, 1))
+    tbl.add_column("key",   style="dim")
+    tbl.add_column("count", style="bold cyan", justify="right")
+    for k, v in counts.items():
+        if isinstance(v, list):
+            tbl.add_row(k, str(len(v)))
+        elif v is not None:
+            tbl.add_row(k, str(v))
+
+    title = Text.assemble(
+        ("📥  ", ""),
+        (f"[{_now()}]  ", "dim white"),
+        (f"{short} — baseline seeded", "bold cyan"),
+    )
+    console.print(Panel(tbl, title=title, border_style="cyan", padding=(0, 1)))
+
+
+#╔══════════════════════════════════════════════════════════════════════╗
+#║        difference checking engine                                    ║
+#╚══════════════════════════════════════════════════════════════════════╝
 
 async def diff_snapshot(site: str, snap: dict) -> bool:
     """
-    Compare *snap* against the cached state for *site*.
-    Returns True if any alert was fired.
-    Must be called while holding _cache_lock.
+    Diff *snap* against cached state for *site*.  Returns True if any alert fired.
+    Must be called while _cache_lock is held.
     """
     sc      = _cache.setdefault(site, _empty_site())
+    short   = SITE_SHORT.get(site, site.upper())
     changed = False
 
     # ── Whole-page text blocks (catch-all) ────────────────────────────────────
     live_blocks = enrich(snap.get("fullTextBlocks", []))
     new_blocks  = find_new(sc.get("full_text_blocks", []), live_blocks)
     if new_blocks:
-        meaningful = [b for b in new_blocks
-                      if len(b.get("text", "").strip()) > 20]
+        meaningful = [b for b in new_blocks if len(b.get("text", "").strip()) > 20]
         if meaningful:
-            alert_box(site, "⚠  New page content detected", meaningful)
+            alert_box(site, "⚠ New page content", meaningful)
             await log_change(site, "Whole-page content", meaningful)
             notify(
-                f"{'JEE Main' if site == 'jee' else 'TG EAPCET'} — Page updated",
-                "\n".join(i["text"][:80] for i in meaningful[:3]),
+                f"{short} — Page updated",
+                "\n".join(str(i.get("text", ""))[:80] for i in meaningful[:3]),
             )
             beep()
             changed = True
-    # Always merge so known items accumulate correctly
     sc["full_text_blocks"] = merge(sc.get("full_text_blocks", []), live_blocks)
 
     # ── New links ─────────────────────────────────────────────────────────────
     live_links = enrich(snap.get("allLinks", []))
     new_links  = find_new(sc.get("known_links", []), live_links)
     if new_links:
-        real = [lnk for lnk in new_links
-                if lnk.get("href", "").startswith("http")
-                and len(lnk.get("text", "")) > 5]
+        real = [
+            lnk for lnk in new_links
+            if lnk.get("href", "").startswith("http") and len(str(lnk.get("text", ""))) > 5
+        ]
         if real:
-            alert_box(site, "🔗  New link(s) on page", real)
+            alert_box(site, "🔗 New link(s)", real)
             await log_change(site, "New links", real)
             notify(
-                f"{'JEE Main' if site == 'jee' else 'TG EAPCET'} — New link",
-                "\n".join(i["text"][:80] for i in real[:3]),
+                f"{short} — New link",
+                "\n".join(str(i.get("text", ""))[:80] for i in real[:3]),
             )
             beep()
             changed = True
@@ -379,7 +453,7 @@ async def diff_snapshot(site: str, snap: dict) -> bool:
 
     # ── Update stored page hash ───────────────────────────────────────────────
     live_hash = snap.get("pageHash")
-    if live_hash and live_hash != sc.get("page_hash"):
+    if live_hash:
         sc["page_hash"] = live_hash
 
     # ── JEE-specific ──────────────────────────────────────────────────────────
@@ -387,31 +461,29 @@ async def diff_snapshot(site: str, snap: dict) -> bool:
         live_date = snap.get("lastUpdated")
         if live_date and live_date != sc.get("last_updated_date"):
             old = sc.get("last_updated_date") or "—"
-            print(f"\r{_ERASE_LINE}")
-            print(f"{R}{'━'*70}")
-            print(f"  🗓  [{_ts()}]  JEE Main — SITE DATE CHANGED")
-            print(f"{'━'*70}{Z}")
-            print(f"  Was : {D}{old}{Z}")
-            print(f"  Now : {G}{live_date}{Z}\n")
-            await log_change(site, "Last Updated Date",
-                             [{"text": f"{old} → {live_date}", "href": ""}])
-            notify("JEE — Site date changed", f"{old} → {live_date}")
-            beep()
-            changed = True
+            if old != "—":   # only alert if we had a previous value
+                date_change_box(site, old, live_date)
+                await log_change(site, "Last Updated Date",
+                                 [{"text": f"{old} → {live_date}", "href": ""}])
+                notify("JEE — Site date changed", f"{old} → {live_date}")
+                beep()
+                changed = True
             sc["last_updated_date"] = live_date
 
-        for snap_key, label, cache_key in (
-            ("publicNotices",     "📋  Public Notices",     "public_notices"),
-            ("candidateActivity", "🎓  Candidate Activity", "candidate_activity"),
-            ("latestNews",        "📰  Latest News Ticker", "latest_news_jee"),
+        for snap_key, section_label, cache_key in (
+            ("publicNotices",     "📋 Public Notices",     "public_notices"),
+            ("candidateActivity", "🎓 Candidate Activity", "candidate_activity"),
+            ("latestNews",        "📰 Latest News Ticker", "latest_news_jee"),
         ):
-            live  = enrich(snap.get(snap_key, []))
-            new   = find_new(sc.get(cache_key, []), live)
+            live = enrich(snap.get(snap_key, []))
+            new  = find_new(sc.get(cache_key, []), live)
             if new:
-                alert_box(site, label, new)
-                await log_change(site, label.strip(), new)
-                notify(f"JEE — {label.strip()}",
-                       "\n".join(i["text"][:80] for i in new[:3]))
+                alert_box(site, section_label, new)
+                await log_change(site, section_label, new)
+                notify(
+                    f"JEE — {section_label}",
+                    "\n".join(str(i.get("text", ""))[:80] for i in new[:3]),
+                )
                 beep()
                 changed = True
             sc[cache_key] = merge(sc.get(cache_key, []), live)
@@ -421,10 +493,12 @@ async def diff_snapshot(site: str, snap: dict) -> bool:
         live = enrich(snap.get("latestUpdates", []))
         new  = find_new(sc.get("latest_updates", []), live)
         if new:
-            alert_box(site, "📋  Latest Updates", new)
+            alert_box(site, "📋 Latest Updates", new)
             await log_change(site, "Latest Updates", new)
-            notify("TG EAPCET — New Update",
-                   "\n".join(i["text"][:80] for i in new[:3]))
+            notify(
+                "TG EAPCET — New Update",
+                "\n".join(str(i.get("text", ""))[:80] for i in new[:3]),
+            )
             beep()
             changed = True
         sc["latest_updates"] = merge(sc.get("latest_updates", []), live)
@@ -433,87 +507,81 @@ async def diff_snapshot(site: str, snap: dict) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  CORS header factory
+#  HTTP helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _cors(extra: dict | None = None) -> dict:
-    h = {
-        "Access-Control-Allow-Origin":  "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Content-Type": "application/json",
-    }
-    if extra:
-        h.update(extra)
-    return h
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type":                 "application/json",
+}
 
 
-def _json_resp(data: dict, status: int = 200) -> web.Response:
+def _json(data: dict, status: int = 200) -> web.Response:
     return web.Response(
         status=status,
-        headers=_cors(),
+        headers=_CORS_HEADERS,
         text=json.dumps(data, ensure_ascii=False),
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Middleware: body-size limiter
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ── Middleware: cap inbound payload ───────────────────────────────────────────
 @web.middleware
 async def body_size_limit(request: web.Request, handler):
-    if request.content_length and request.content_length > MAX_BODY_BYTES:
-        return _json_resp(
-            {"status": "error", "reason": "payload_too_large"},
-            status=413,
-        )
+    cl = request.content_length
+    if cl is not None and cl > MAX_BODY_BYTES:
+        return _json({"status": "error", "reason": "payload_too_large"}, status=413)
     return await handler(request)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  HTTP route handlers
+#  Route handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_options(request: web.Request) -> web.Response:
-    """Handle CORS pre-flight for any route."""
-    return web.Response(status=204, headers=_cors())
+    return web.Response(status=204, headers=_CORS_HEADERS)
 
 
 async def handle_snapshot(request: web.Request) -> web.Response:
     global _request_count
 
-    # ── Parse body ────────────────────────────────────────────────────────────
     try:
         body = await request.json()
     except Exception:
-        return _json_resp({"status": "error", "reason": "invalid_json"}, status=400)
+        return _json({"status": "error", "reason": "invalid_json"}, status=400)
 
     if not isinstance(body, dict):
-        return _json_resp({"status": "error", "reason": "body_must_be_object"}, status=400)
+        return _json({"status": "error", "reason": "body_must_be_object"}, status=400)
 
-    site = body.get("site", "")
-    kind = body.get("kind", "snapshot")
+    site = str(body.get("site", "")).strip().lower()
+    kind = str(body.get("kind", "snapshot")).strip().lower()
 
+    assert _cache_lock is not None
     async with _cache_lock:
         _request_count += 1
 
-        # ── Ping (keepalive) ──────────────────────────────────────────────────
+        # ── Ping (keepalive — no site validation required) ────────────────────
         if kind == "ping":
-            _connected_sites.add(SITE_LABELS.get(site, site))
-            print_status()
-            return _json_resp({"status": "pong", "site": site})
+            if site in KNOWN_SITES:
+                _connected_sites.add(site)   # ← store raw key, not label
+            return _json({"status": "pong", "site": site})
 
-        # ── Hello (first connect) ─────────────────────────────────────────────
+        # ── Below this point, site must be known ──────────────────────────────
+        if site not in KNOWN_SITES:
+            return _json(
+                {"status": "error", "reason": f"unknown site '{site}'"},
+                status=400,
+            )
+
+        # handshake checking function
         if kind == "hello":
-            if site not in KNOWN_SITES:
-                return _json_resp(
-                    {"status": "error", "reason": f"unknown site '{site}'"},
-                    status=400,
-                )
-            _connected_sites.add(SITE_LABELS.get(site, site))
+            _connected_sites.add(site)   # ← raw key
             sc = _cache.get(site, _empty_site())
-            info(f"{G}Browser connected  →  {SITE_LABELS.get(site, site)}{Z}")
-            return _json_resp({
+            print_info(
+                f"[bold green]Browser connected[/bold green]  →  {SITE_LABELS.get(site, site)}"
+            )
+            return _json({
                 "status":       "welcome",
                 "site":         site,
                 "is_first_run": sc.get("page_hash") is None,
@@ -528,24 +596,19 @@ async def handle_snapshot(request: web.Request) -> web.Response:
             })
 
         # ── Snapshot ──────────────────────────────────────────────────────────
-        if site not in KNOWN_SITES:
-            return _json_resp(
-                {"status": "error", "reason": f"unknown site '{site}'"},
-                status=400,
-            )
-
         snap = body.get("data")
         if not isinstance(snap, dict):
-            return _json_resp(
+            return _json(
                 {"status": "error", "reason": "missing or invalid 'data' field"},
                 status=400,
             )
 
+        _connected_sites.add(site)   # ← raw key
         sc = _cache.setdefault(site, _empty_site())
 
-        # ── First-ever snapshot: seed the baseline ────────────────────────────
+        # First-ever snapshot → seed the baseline
         if sc.get("page_hash") is None:
-            info(f"{Y}[{site.upper()}] Seeding baseline …{Z}")
+            print_info(f"[yellow][{site.upper()}] Seeding baseline …[/yellow]")
             sc["page_hash"]          = snap.get("pageHash")
             sc["public_notices"]     = enrich(snap.get("publicNotices",     []))
             sc["candidate_activity"] = enrich(snap.get("candidateActivity", []))
@@ -554,87 +617,80 @@ async def handle_snapshot(request: web.Request) -> web.Response:
             sc["known_links"]        = enrich(snap.get("allLinks",          []))
             sc["latest_news_jee"]    = enrich(snap.get("latestNews",        []))
             sc["last_updated_date"]  = snap.get("lastUpdated")
-            _connected_sites.add(SITE_LABELS.get(site, site))
             await save_cache(_cache)
-            print_status()
-            return _json_resp({
+            baseline_box(site, sc)
+            return _json({
                 "status":  "baseline_saved",
-                "counts": {
-                    k: len(v) if isinstance(v, list) else v
-                    for k, v in sc.items()
-                },
+                "counts": {k: len(v) if isinstance(v, list) else v for k, v in sc.items()},
             })
 
-        # ── Diff against baseline ─────────────────────────────────────────────
+        # Diff against baseline
         changed = await diff_snapshot(site, snap)
         if changed:
-            _cache["meta"]["total_alerts"] = (
-                _cache["meta"].get("total_alerts", 0) + 1
-            )
-        _connected_sites.add(SITE_LABELS.get(site, site))
+            meta = _cache.setdefault("meta", _empty_cache()["meta"])
+            meta["total_alerts"] = meta.get("total_alerts", 0) + 1
         await save_cache(_cache)
-        print_status()
 
-        return _json_resp({
+        return _json({
             "status":       "diffed",
             "changed":      changed,
-            "total_alerts": _cache["meta"]["total_alerts"],
+            "total_alerts": _cache.get("meta", {}).get("total_alerts", 0),
         })
 
 
 async def handle_ping(request: web.Request) -> web.Response:
-    uptime = int(time.monotonic() - _start_time)
-    return _json_resp({
+    return _json({
         "status":       "ok",
         "version":      __version__,
-        "uptime_s":     uptime,
+        "uptime_s":     int(time.monotonic() - _start_time),
         "total_alerts": _cache.get("meta", {}).get("total_alerts", 0),
-        "sites_seen":   sorted(_connected_sites),
+        # Resolve labels for external callers
+        "sites_seen":   [SITE_LABELS.get(s, s) for s in sorted(_connected_sites)],
         "requests":     _request_count,
     })
 
 
 async def handle_status(request: web.Request) -> web.Response:
     summary: dict = {}
-    for site_key in KNOWN_SITES:
-        sc = _cache.get(site_key, _empty_site())
-        summary[site_key] = {
+    for sk in KNOWN_SITES:
+        sc = _cache.get(sk, _empty_site())
+        summary[sk] = {
             k: len(v) if isinstance(v, list) else v
             for k, v in sc.items()
         }
-    return _json_resp({
+    return _json({
         "cache":    summary,
         "meta":     _cache.get("meta", {}),
         "uptime_s": int(time.monotonic() - _start_time),
         "version":  __version__,
+        "active_sites": [SITE_LABELS.get(s, s) for s in sorted(_connected_sites)],
     })
 
 
 async def handle_reset(request: web.Request) -> web.Response:
-    """
-    POST /reset           — wipe entire cache
-    POST /reset?site=jee  — wipe only the jee cache entry
-    """
+    """POST /reset  or  POST /reset?site=jee|eapcet"""
+    assert _cache_lock is not None
     async with _cache_lock:
-        site_param = request.rel_url.query.get("site")
+        site_param = request.rel_url.query.get("site", "").strip().lower()
         if site_param:
             if site_param not in KNOWN_SITES:
-                return _json_resp(
+                return _json(
                     {"status": "error", "reason": f"unknown site '{site_param}'"},
                     status=400,
                 )
             _cache[site_param] = _empty_site()
+            _connected_sites.discard(site_param)
             await save_cache(_cache)
-            info(f"{Y}Cache reset for site: {site_param}{Z}")
-            return _json_resp({"status": "reset", "site": site_param})
+            print_info(f"[yellow]Cache reset for site: {site_param}[/yellow]")
+            return _json({"status": "reset", "site": site_param})
         else:
             for sk in list(KNOWN_SITES):
                 _cache[sk] = _empty_site()
-            _cache["meta"]["total_alerts"] = 0
-            await save_cache(_cache)
+            _cache.setdefault("meta", {})["total_alerts"] = 0
             _connected_sites.clear()
-            info(f"{Y}Full cache reset.{Z}")
-            return _json_resp({"status": "reset", "site": "all"})
+            await save_cache(_cache)
+            print_info("[yellow]Full cache reset.[/yellow]")
+            return _json({"status": "reset", "site": "all"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -647,96 +703,64 @@ async def _status_ticker_loop() -> None:
             await asyncio.sleep(30)
             print_status()
     except asyncio.CancelledError:
-        pass   # clean exit — don't propagate
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Startup banner
+#  Application wiring
 # ─────────────────────────────────────────────────────────────────────────────
 
-def print_header(host: str, port: int) -> None:
-    if not _COLORAMA_OK:
-        print("(colorama not installed — output will be monochrome)")
-    print(C + f"""
-╔══════════════════════════════════════════════════════════════════════╗
-║         Exam Monitor — HTTP Server  v{__version__:<28}   ║
-║         JEE Main  +  TG EAPCET  │  GM_xhr POST  │  CSP bypassed    ║
-╚══════════════════════════════════════════════════════════════════════╝""" + Z)
-    print(f"  Cache   : {D}{CACHE_FILE.resolve()}{Z}")
-    print(f"  Log     : {D}{LOG_FILE.resolve()}{Z}")
-    print(f"  Notify  : {G if _PLYER_OK else Y}{'enabled' if _PLYER_OK else 'disabled (plyer not installed)'}{Z}")
-    print()
-    print(f"  {G}HTTP server  →  http://{host}:{port}{Z}")
-    print(f"  {D}POST http://{host}:{port}/snapshot  — snapshot endpoint")
-    print(f"  GET  http://{host}:{port}/ping      — health check")
-    print(f"  GET  http://{host}:{port}/status    — cache summary")
-    print(f"  POST http://{host}:{port}/reset     — wipe cache (add ?site=jee|eapcet){Z}")
-    print()
-    print(f"  {Y}ℹ  CSP on JEE site blocks WebSocket — using GM_xhr POST instead.")
-    print(f"     GM_xhr is fully exempt from CSP. No scraping. Browser still pushes.{Z}")
-    print()
-    print(f"  Tampermonkey will auto-run on JEE / EAPCET tabs.")
-    print(f"  {D}Ctrl-C to stop.{Z}")
-    print("  " + D + "─" * 68 + Z + "\n")
+async def _run(host: str, port: int) -> None:
+    global _ticker_task, _cache_lock
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Main
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _main_async(host: str, port: int) -> None:
-    global _ticker_task
+    _cache_lock = asyncio.Lock()
 
     app = web.Application(middlewares=[body_size_limit])
-
-    # Route table
     app.router.add_post("/snapshot", handle_snapshot)
     app.router.add_post("/reset",    handle_reset)
     app.router.add_get("/ping",      handle_ping)
-    app.router.add_get("/",          handle_ping)   # root = health-check alias
+    app.router.add_get("/",          handle_ping)
     app.router.add_get("/status",    handle_status)
-    # Explicit OPTIONS handlers for CORS pre-flight on all routes
     for path in ("/snapshot", "/reset", "/ping", "/status", "/"):
         app.router.add_options(path, handle_options)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
-    tcp_site = web.TCPSite(runner, host, port)
-    await tcp_site.start()
+    tcp = web.TCPSite(runner, host, port)
+    await tcp.start()
 
-    info(f"{G}Listening on http://{host}:{port}{Z}")
+    print_info(f"[bold green]Listening on http://{host}:{port}[/bold green]")
+    console.print(Rule(style="dim"))
 
     _ticker_task = asyncio.get_event_loop().create_task(_status_ticker_loop())
     try:
-        # Park here until Ctrl-C cancels via KeyboardInterrupt → asyncio.run()
-        await asyncio.Event().wait()
+        await asyncio.Event().wait()      # park until KeyboardInterrupt
     finally:
         _ticker_task.cancel()
         await _ticker_task
-        await runner.cleanup()          # ← properly releases the port
+        await runner.cleanup()            # release port properly
 
 
 def main() -> None:
-    global _cache, _notify_enabled, _cache_lock, _start_time
+    global _cache, _notify_enabled, _start_time
 
     ap = argparse.ArgumentParser(
-        description="Exam Monitor HTTP server (v6).",
+        description="Exam Monitor HTTP server (v7).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--host",       default="localhost",
-                    help="Interface to bind (use 0.0.0.0 for all interfaces).")
-    ap.add_argument("--port",       type=int, default=8765)
-    ap.add_argument("--reset",      action="store_true",
+    ap.add_argument("--host",      default="localhost",
+                    help="Interface to bind.")
+    ap.add_argument("--port",      type=int, default=8765)
+    ap.add_argument("--reset",     action="store_true",
                     help="Wipe cache file and start fresh.")
-    ap.add_argument("--no-notify",  action="store_true",
+    ap.add_argument("--no-notify", action="store_true",
                     help="Disable desktop notifications.")
-    ap.add_argument("--version",    action="version",
-                    version=f"%(prog)s {__version__}")
+    ap.add_argument("--version",   action="version", version=f"%(prog)s {__version__}")
     args = ap.parse_args()
 
     if args.reset and CACHE_FILE.exists():
         CACHE_FILE.unlink()
-        print(f"  {Y}Cache wiped.{Z}")
+        console.print("  [yellow]Cache wiped.[/yellow]")
 
     _cache          = load_cache()
     _notify_enabled = not args.no_notify
@@ -745,23 +769,18 @@ def main() -> None:
     print_header(args.host, args.port)
 
     try:
-        # asyncio.Lock must be created inside an event loop on Python 3.10+
-        async def _run():
-            global _cache_lock
-            _cache_lock = asyncio.Lock()
-            await _main_async(args.host, args.port)
-
-        asyncio.run(_run())
+        asyncio.run(_run(args.host, args.port))
     except KeyboardInterrupt:
-        pass   # shutdown is handled in _main_async's finally block
+        pass
     finally:
-        # Best-effort synchronous save on exit (async loop may be gone)
         try:
             _save_cache_sync(_cache)
         except Exception:
             pass
-        print(f"\n\n  {Y}Stopped.  Cache → {CACHE_FILE}{Z}")
-        print(f"  {D}Changes  → {LOG_FILE}{Z}\n")
+        console.print()
+        console.print(f"  [yellow]Stopped.[/yellow]  Cache → [cyan]{CACHE_FILE}[/cyan]")
+        console.print(f"  [dim]Changes → {LOG_FILE}[/dim]")
+        console.print()
 
 
 if __name__ == "__main__":
