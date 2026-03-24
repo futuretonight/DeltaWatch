@@ -97,16 +97,6 @@ python monitor_server_v7.py
  └── exam_changes.log       # History
 ```
 
----
-
-## 📊 Live Stats (Optional)
-
-<p align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=futuretonight&show_icons=true&theme=tokyonight"/>
-</p>
-
----
-
 ## 💡 Pro Tip
 
 > Full architecture, CSP bypass explanation, and extension support → **Wiki**
